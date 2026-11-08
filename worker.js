@@ -5,48 +5,72 @@ export default {
 
     const APP_URL = "https://reflohdc.netlify.app";
     const SUPABASE_URL = "https://jqsdiyrvdzwmqazdotci.supabase.co";
+    
+    // Supabase API Key
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impxc2RpeXJ2ZHp3bXFhemRvdGNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzMjk0MDAsImV4cCI6MjEwNDkwNTQwMH0._syYsiWtVfe6vZ678Oent7r1di_1VUpqjYBn8mMqR6o";
 
     let bizName = "Customer Hub | REFLO";
-    let bizDesc = "Leave feedback or schedule an appointment online with us.";
     let logoUrl = `${APP_URL}/assets/images/default-business-logo.png`;
     let displayLocation = "";
+    let customDesc = "";
 
-    // 1. Fetch Dynamic Business Metadata directly from Supabase REST API
+    // 1. Fetch Dynamic Business Metadata from Database
     if (slug) {
       try {
-        const apiRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/businesses?slug=ilike.${encodeURIComponent(slug)}&select=name,description,logo_url,address,city,state`,
-          {
-            headers: {
-              "apikey": SUPABASE_KEY,
-              "Authorization": `Bearer ${SUPABASE_KEY}`
-            }
+        // 🟢 Uses select=* so missing column names NEVER cause a 400 error
+        const apiUrl = `${SUPABASE_URL}/rest/v1/businesses?slug=ilike.${encodeURIComponent(slug)}&select=*`;
+        
+        const apiRes = await fetch(apiUrl, {
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
+            "Accept": "application/json"
           }
-        );
-        const rows = await apiRes.json();
-        if (Array.isArray(rows) && rows.length > 0) {
-          const biz = rows[0];
-          if (biz.name) bizName = biz.name;
-          const locParts = [biz.address, biz.city, biz.state].filter(Boolean);
-          if (locParts.length > 0) displayLocation = locParts.join(", ");
-          if (biz.description && biz.description.trim()) bizDesc = biz.description.trim();
-          if (biz.logo_url) {
-            logoUrl = biz.logo_url.startsWith("http")
-              ? biz.logo_url
-              : `${SUPABASE_URL}/storage/v1/object/public/logos/${biz.logo_url}`;
+        });
+
+        if (apiRes.ok) {
+          const rows = await apiRes.json();
+          if (Array.isArray(rows) && rows.length > 0) {
+            const biz = rows[0];
+            
+            // 🟢 Real Business Name (Glow Haven Studio)
+            if (biz.name) bizName = biz.name;
+            
+            // Auto-detect location across any existing columns
+            const locParts = [biz.address, biz.city, biz.state, biz.location].filter(Boolean);
+            if (locParts.length > 0) {
+              displayLocation = locParts.join(", ");
+            }
+
+            if (biz.description && biz.description.trim()) {
+              customDesc = biz.description.trim();
+            }
+
+            // 🟢 Resolve Uploaded Logo (The Gold Badge)
+            if (biz.logo_url) {
+              if (biz.logo_url.startsWith("http")) {
+                logoUrl = biz.logo_url;
+              } else {
+                const cleanLogo = biz.logo_url.replace(/^logos\//, "");
+                logoUrl = `${SUPABASE_URL}/storage/v1/object/public/logos/${cleanLogo}`;
+              }
+            }
           }
         }
       } catch (_) {}
     }
 
-    const socialDescription = displayLocation 
-      ? `📍 ${displayLocation} • ${bizDesc}`
-      : bizDesc;
+    // 2. Format Action Text & Location
+    const locationPrefix = displayLocation ? `📍 ${displayLocation} • ` : "";
+    const actionText = `⭐ 1. Leave Feedback  •  📅 2. Book an Appointment`;
+    
+    const socialDescription = customDesc 
+      ? `${locationPrefix}${actionText} — ${customDesc}`
+      : `${locationPrefix}${actionText} online with us.`;
 
     const targetRedirect = `${APP_URL}/?biz=${encodeURIComponent(slug)}`;
 
-    // 2. Detect Social Media Bots vs Real Humans
+    // 3. Detect Social Media Bots vs Real Humans
     const userAgent = (request.headers.get("user-agent") || "").toLowerCase();
     const isSocialCrawler = 
       userAgent.includes("telegrambot") ||
@@ -55,7 +79,7 @@ export default {
       userAgent.includes("twitterbot") ||
       userAgent.includes("linkedinbot");
 
-    // 3. Generate Clean Open Graph HTML
+    // 4. Generate Clean Open Graph HTML
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -92,7 +116,6 @@ export default {
 </body>
 </html>`;
 
-    // 🟢 Cloudflare serves real text/html — never rewritten to text/plain!
     return new Response(html, {
       status: 200,
       headers: {
